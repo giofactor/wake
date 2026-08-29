@@ -140,6 +140,30 @@
   #keysheet .row{display:flex;gap:10px}
   #keysave{flex:1;font-family:var(--hud);font-weight:700;letter-spacing:.1em;font-size:14px;
     color:#03121B;background:var(--cyan);border:none;border-radius:8px;padding:13px;cursor:pointer}
+  #sheet{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:25;display:none;
+    max-height:72%;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    background:var(--panel-solid);border-top:1px solid var(--edge-hi);
+    border-radius:14px 14px 0 0;padding:16px 16px calc(20px + env(safe-area-inset-bottom,0px))}
+  #sheet.show{display:block}
+  #sheet h2{font-size:14px;font-weight:700;letter-spacing:.2em;color:var(--muted);margin-bottom:10px}
+  #sheet h2 span{color:var(--cyan)}
+  .port{display:grid;grid-template-columns:12px 1fr;gap:0 12px;padding:10px 0;border-bottom:1px solid var(--edge)}
+  .port:last-child{border-bottom:none}
+  .pdot{width:10px;height:10px;border-radius:50%;border:2px solid var(--muted);margin-top:4px}
+  .port.done .pdot{background:var(--muted);border-color:var(--muted);opacity:.5}
+  .port.now .pdot{background:var(--good);border-color:var(--good);box-shadow:0 0 8px var(--good)}
+  .port.next .pdot{background:var(--amber);border-color:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .pname{font-weight:700;font-size:15px;letter-spacing:.04em}
+  .port.done .pname{color:var(--muted)}
+  .pwhen{font-family:var(--mono);font-size:11px;color:var(--muted);margin:1px 0 3px}
+  .pwhen b{color:var(--amber);font-weight:600}
+  .port.now .pwhen b{color:var(--good)}
+  .pplan{font-size:13px;line-height:1.45;color:var(--ink)}
+  .ptip{font-size:12px;line-height:1.45;color:var(--muted);margin-top:2px}
+  .portmark{transform:translate(-50%,-50%);font-family:var(--mono);font-size:9px;letter-spacing:.06em;
+    color:var(--ink);background:rgba(7,15,25,.75);border:1px solid var(--edge-hi);
+    border-radius:4px;padding:2px 5px;white-space:nowrap;pointer-events:none}
+  .portmark.done{opacity:.45}
   #keycancel{font-family:var(--hud);font-weight:600;font-size:14px;color:var(--muted);
     background:none;border:1px solid var(--edge);border-radius:8px;padding:13px 18px;cursor:pointer}
 </style>
@@ -174,6 +198,12 @@
       <path d="M10 0v3M10 17v3M0 10h3M17 10h3" stroke="currentColor" stroke-width="1.5"/>
     </svg>
   </button>
+  <button class="ctl" id="planbtn" aria-label="Voyage plan">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <rect x="2.5" y="3.5" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M2.5 7h13M6 1.5v3M12 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </button>
   <button class="ctl" id="clear" aria-label="Clear trail">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <path d="M3 5h12M7 5V3h4v2M5 5l1 10h6l1-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -197,6 +227,7 @@
   <div class="note">ship AIS needs only wifi &middot; no GPS required</div>
 </div>
 
+<div id="sheet"></div>
 <div id="keysheet">
   <div class="kbox">
     <h2>AIS FEED KEY</h2>
@@ -531,6 +562,113 @@ $('startbtn').addEventListener('click', () => { startShipMode(); syncModeButtons
 $('startbtn2').addEventListener('click', () => { startGPSMode(); syncModeButtons(); });
 
 updateDeck();
+
+/* ================= voyage: ports, ETA, shared track ================= */
+const PORTS = [
+  {n:'London · Greenwich',  lat:51.4826, lon:-0.0077, a:Date.UTC(2026,7,27,12,0), d:Date.UTC(2026,7,29,1,0),
+   plan:'Embarkation.', tip:''},
+  {n:'Cowes · Isle of Wight', lat:50.7631, lon:-1.2973, a:Date.UTC(2026,7,29,9,0), d:Date.UTC(2026,7,29,15,0),
+   plan:'Port call.', tip:''},
+  {n:'Bordeaux · overnight', lat:44.8578, lon:-0.5522, a:Date.UTC(2026,7,31,8,15), d:Date.UTC(2026,8,1,7,45),
+   plan:'Miroir d’Eau reflecting pool on the quay (short walk, great for little ones). Overnight in port — Saint-Émilion wine tour in shifts.',
+   tip:'Ship docks city-center on the river quay — no car needed, everything walkable or tram B. Car hire if wanted: Gare Saint-Jean (Sixt / Hertz / Europcar), 10 min taxi.'},
+  {n:'Porto · Leixões',  lat:41.1835, lon:-8.7005, a:Date.UTC(2026,8,3,7,0),  d:Date.UTC(2026,8,3,16,0),
+   plan:'Private car planned. World of Discoveries (indoor boat ride), then Ribeira riverfront. Livraria Lello needs a timed ticket in advance.',
+   tip:'Dock is 25–30 min from the city — prebook the car or grab an Uber/Bolt at the terminal (both work well in Porto). Rentals in Matosinhos: Europcar / Guerin.'},
+  {n:'Lisbon',             lat:38.7118, lon:-9.1219, a:Date.UTC(2026,8,4,7,0),  d:Date.UTC(2026,8,4,16,0),
+   plan:'Private car planned. Oceanário de Lisboa + Parque das Nações. Skip Tram 28 (pickpockets, standing room).',
+   tip:'Cruise terminal is central (Santa Apolónia). Uber/Bolt everywhere; rentals at terminal & airport (Sixt / Europcar). Pastéis de Belém if time allows.'},
+  {n:'Cartagena',          lat:37.5970, lon:-0.9787, a:Date.UTC(2026,8,6,7,0),  d:Date.UTC(2026,8,6,16,0),
+   plan:'No booking needed — flat, walkable old town off the gangway. Roman Theatre, then taxi to Cala Cortina beach.',
+   tip:'Everything within 15 min on foot. Rentals if wanted: Enterprise / Goldcar in town, but skip the car here.'},
+  {n:'Ibiza',              lat:38.9089, lon:1.4351,  a:Date.UTC(2026,8,7,9,30), d:Date.UTC(2026,8,7,16,0),
+   plan:'Private car to Cala Comte beach planned — short day, old town too steep for a stroller.',
+   tip:'Drivers & rentals cluster at the harbor (Class Rent a Car / Avis). Book the beach car ahead — September is still busy.'},
+  {n:'Barcelona · debark', lat:41.3723, lon:2.1830,  a:Date.UTC(2026,8,8,5,0),  d:null,
+   plan:'Arrive 07:00. Hotel 2 nights, fly home Sep 10. Sagrada Família needs timed tickets; Barceloneta beach; CosmoCaixa + Tibidabo as the kid-day option.',
+   tip:'Taxis at the terminal; all rentals at Sants station or the airport. Book Sagrada tickets NOW — they sell out days ahead.'}
+];
+
+function fmtDelta(ms){
+  const m = Math.max(0, Math.round(ms/60000));
+  const d = Math.floor(m/1440), h = Math.floor((m%1440)/60), mm = m%60;
+  return d>0 ? d+'d '+h+'h' : (h>0 ? h+'h '+mm+'m' : mm+'m');
+}
+function portState(p, now){
+  if (p.d && now > p.d) return 'done';
+  if (now >= p.a && (!p.d || now <= p.d)) return 'now';
+  return 'up';
+}
+function renderSheet(){
+  const now = Date.now();
+  let nextIdx = PORTS.findIndex(p => portState(p, now) !== 'done');
+  const rows = PORTS.map((p, i) => {
+    const st = portState(p, now);
+    const cls = st === 'done' ? 'done' : (st === 'now' ? 'now' : (i === nextIdx ? 'next' : ''));
+    let when;
+    const opts = {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', timeZone:'UTC'};
+    const arrTxt = new Date(p.a).toLocaleString([], {month:'short', day:'numeric'});
+    if (st === 'done') when = arrTxt + ' · sailed';
+    else if (st === 'now') when = 'IN PORT' + (p.d ? ' · departs in <b>' + fmtDelta(p.d - now) + '</b>' : '');
+    else when = arrTxt + ' · arriving in <b>' + fmtDelta(p.a - now) + '</b>';
+    return '<div class="port ' + cls + '"><div class="pdot"></div><div>' +
+      '<div class="pname">' + p.n + '</div>' +
+      '<div class="pwhen">' + when + '</div>' +
+      (st !== 'done' && p.plan ? '<div class="pplan">' + p.plan + '</div>' : '') +
+      (st !== 'done' && p.tip  ? '<div class="ptip">'  + p.tip  + '</div>' : '') +
+      '</div></div>';
+  }).join('');
+  $('sheet').innerHTML = '<h2>VOYAGE <span>//</span> LONDON → BARCELONA</h2>' + rows;
+}
+const planBtn = $('planbtn');
+planBtn.addEventListener('click', () => {
+  const s = $('sheet');
+  const showing = s.classList.toggle('show');
+  planBtn.classList.toggle('on', showing);
+  if (showing) renderSheet();
+});
+setInterval(() => { if ($('sheet').classList.contains('show')) renderSheet(); }, 60000);
+
+/* port markers + planned route on the map */
+map.on('load', () => {
+  const now = Date.now();
+  map.addSource('route', { type:'geojson', data:{ type:'Feature',
+    geometry:{ type:'LineString', coordinates: PORTS.map(p => [p.lon, p.lat]) } } });
+  map.addLayer({ id:'route', type:'line', source:'route',
+    paint:{ 'line-color':'#4FD8FF', 'line-width':1.2, 'line-dasharray':[1,2.5], 'line-opacity':0.5 } },
+    'trail-glow');
+  for (const p of PORTS){
+    const el = document.createElement('div');
+    el.className = 'portmark' + (portState(p, now) === 'done' ? ' done' : '');
+    el.textContent = p.n.split(' · ')[0].toUpperCase();
+    new maplibregl.Marker({ element: el, anchor:'center' }).setLngLat([p.lon, p.lat]).addTo(map);
+  }
+});
+
+/* shared sailing history */
+let trackLoaded = false;
+async function loadTrack(){
+  try {
+    const r = await fetch('./track.json?ts=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!Array.isArray(d.pts) || d.pts.length < 2) return;
+    trail = d.pts.slice();
+    totalNm = 0;
+    for (let i = 1; i < trail.length; i++){
+      const nm = nmBetween(trail[i-1], trail[i]);
+      if (nm < 50) totalNm += nm;
+    }
+    trackLoaded = true;
+    refreshTrail(); updateDeck();
+  } catch(e){}
+}
+const _startShipMode = startShipMode;
+startShipMode = async function(){
+  await _startShipMode();
+  loadTrack();
+  if (!window.__trackTimer) window.__trackTimer = setInterval(() => { if (mode === 'ship') loadTrack(); }, 600000);
+};
 
 /* ================= guest / share mode ================= */
 const isGuest = new URLSearchParams(location.search).has('guest') || location.pathname.includes('/follow');
