@@ -531,6 +531,17 @@ $('startbtn').addEventListener('click', () => { startShipMode(); syncModeButtons
 $('startbtn2').addEventListener('click', () => { startGPSMode(); syncModeButtons(); });
 
 updateDeck();
+
+/* ================= guest / share mode ================= */
+const isGuest = new URLSearchParams(location.search).has('guest') || location.pathname.includes('/follow');
+if (isGuest){
+  $('startov').style.display = 'none';
+  $('startbtn2').style.display = 'none';
+  $('shipbtn').style.display = 'none';   // no key sheet for guests
+  $('clear').style.display = 'none';
+  document.querySelector('#topbar .name').innerHTML = 'EVRIMA<b>//</b>LIVE';
+  startShipMode(); syncModeButtons();
+}
 </script>
 </body>
 </html>
