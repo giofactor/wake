@@ -121,6 +121,27 @@
   #banner b{color:var(--ink);font-weight:600}
   #banner a{color:var(--cyan);cursor:pointer;text-decoration:underline}
   #banner.show{display:block}
+
+  /* ---- start choices & key sheet ---- */
+  #startbtn2{font-family:var(--hud);font-weight:600;letter-spacing:.12em;font-size:13px;
+    color:var(--ink);background:transparent;border:1px solid var(--edge-hi);border-radius:10px;
+    padding:13px 22px;cursor:pointer}
+  #keysheet{position:fixed;inset:0;z-index:30;display:none;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px;padding:24px;
+    background:rgba(4,7,12,.88);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  #keysheet.show{display:flex}
+  #keysheet .kbox{width:min(420px,100%);background:var(--panel-solid);border:1px solid var(--edge);
+    border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:12px}
+  #keysheet h2{font-size:16px;font-weight:700;letter-spacing:.12em}
+  #keysheet p{font-size:13px;line-height:1.5;color:var(--muted)}
+  #keysheet p a{color:var(--cyan)}
+  #aiskey{font-family:var(--mono);font-size:14px;color:var(--ink);background:#04101B;
+    border:1px solid var(--edge-hi);border-radius:8px;padding:12px;width:100%}
+  #keysheet .row{display:flex;gap:10px}
+  #keysave{flex:1;font-family:var(--hud);font-weight:700;letter-spacing:.1em;font-size:14px;
+    color:#03121B;background:var(--cyan);border:none;border-radius:8px;padding:13px;cursor:pointer}
+  #keycancel{font-family:var(--hud);font-weight:600;font-size:14px;color:var(--muted);
+    background:none;border:1px solid var(--edge);border-radius:8px;padding:13px 18px;cursor:pointer}
 </style>
 </head>
 <body>
@@ -130,6 +151,7 @@
 
 <div id="topbar">
   <div class="name">WAKE<b>//</b>SEA</div>
+  <div class="stat"><span id="srctxt" style="color:var(--cyan)"></span></div>
   <div class="stat"><div class="dot wait" id="gpsdot"></div><span id="gpstxt">gps</span></div>
   <div class="stat"><div class="dot" id="netdot"></div><span id="nettxt">link</span></div>
 </div>
@@ -138,6 +160,13 @@
   <button class="ctl" id="zin" aria-label="Zoom in">+</button>
   <button class="ctl" id="zout" aria-label="Zoom out">&minus;</button>
   <button class="ctl" id="tilt" aria-label="Toggle 3D view"><span class="t">3D</span></button>
+  <button class="ctl" id="shipbtn" aria-label="Track ship via AIS">
+    <svg width="19" height="19" viewBox="0 0 20 20" fill="none">
+      <circle cx="10" cy="4.5" r="2.4" stroke="currentColor" stroke-width="1.5"/>
+      <path d="M10 7v9M6.5 9.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+      <path d="M3.5 12c0 3.6 2.9 6 6.5 6s6.5-2.4 6.5-6l-2.4 1.4M3.5 12l2.4 1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    </svg>
+  </button>
   <button class="ctl on" id="follow" aria-label="Follow my position">
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
       <circle cx="10" cy="10" r="3.2" fill="currentColor"/>
@@ -163,13 +192,33 @@
 
 <div id="startov">
   <div class="brand">WAKE<b>//</b>SEA</div>
-  <button id="startbtn">TAP TO START GPS</button>
-  <div class="note">position stays on this phone</div>
+  <button id="startbtn">TRACK EVRIMA &mdash; SHIP AIS</button>
+  <button id="startbtn2">USE PHONE GPS INSTEAD</button>
+  <div class="note">ship AIS needs only wifi &middot; no GPS required</div>
 </div>
 
+<div id="keysheet">
+  <div class="kbox">
+    <h2>AIS FEED KEY</h2>
+    <p>Live ship positions come from <a href="https://aisstream.io" target="_blank" rel="noopener">aisstream.io</a> &mdash; free. Sign in there (GitHub login works), create an API key, paste it here. Saved on this phone only; you do this once.</p>
+    <input id="aiskey" type="text" placeholder="aisstream.io API key" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="row">
+      <button id="keysave">CONNECT</button>
+      <button id="keycancel">CANCEL</button>
+    </div>
+  </div>
+</div>
 <script>
 /* ================= state ================= */
-let pos = null, trail = [], totalNm = 0, follow = true, watchId = null, tilted = true;
+const SHIP = { name: 'EVRIMA', mmsi: '215001000',
+  page: 'https://www.cruisemapper.com/ships/Ritz-Carlton-Evrima-2100' };
+const PROXIES = [
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u)
+];
+let pos = null, trail = [], totalNm = 0, follow = true, tilted = true;
+let mode = null;                 // 'ship' | 'gps'
+let watchId = null, shipTimer = null, ws = null, proxyIdx = 0, lastShip = null;
 try {
   const s = JSON.parse(localStorage.getItem('wake-trail') || 'null');
   if (s && Array.isArray(s.pts)) { trail = s.pts; totalNm = s.nm || 0; }
@@ -177,14 +226,13 @@ try {
 function persist(){
   try { localStorage.setItem('wake-trail', JSON.stringify({pts: trail.slice(-6000), nm: totalNm})); } catch(e){}
 }
+function getKey(){ try { return localStorage.getItem('wake-aiskey') || ''; } catch(e){ return ''; } }
 
 /* ================= map ================= */
 const style = {
   version: 8,
   projection: { type: 'globe' },
-  sky: {
-    'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.35, 5, 0.35, 7, 0]
-  },
+  sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.35, 5, 0.35, 7, 0] },
   light: { anchor: 'map', intensity: 0.2 },
   sources: {
     sat: {
@@ -212,7 +260,6 @@ const style = {
       layout: { 'line-cap': 'round', 'line-join': 'round' } }
   ]
 };
-
 const startCenter = trail.length ? [trail[trail.length-1].lon, trail[trail.length-1].lat] : [-40, 25];
 const map = new maplibregl.Map({
   container: 'map', style,
@@ -256,76 +303,190 @@ const nmBetween = (a, b) => {
 function updateDeck(){
   $('dist').innerHTML = totalNm.toFixed(1) + '<span class="unit">nm</span>';
   if (!pos) return;
-  $('sog').innerHTML = (pos.spd != null ? (pos.spd*1.94384).toFixed(1) : '––') + '<span class="unit">kn</span>';
+  $('sog').innerHTML = (pos.spdKn != null ? pos.spdKn.toFixed(1) : '––') + '<span class="unit">kn</span>';
   $('cog').textContent = (pos.hdg != null ? String(Math.round(pos.hdg)).padStart(3,'0') : '–––') + '°';
   $('latlon').textContent = fmtCoord(pos.lat,'N','S') + '  ' + fmtCoord(pos.lon,'E','W');
   $('stamp').textContent = new Date(pos.t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) +
     (pos.acc ? ' ±' + Math.round(pos.acc) + 'm' : '');
 }
 
-/* ================= gps ================= */
+/* ================= shared fix pipeline ================= */
 const banner = $('banner');
 let firstFix = true;
-
-function onFix(g){
-  const c = g.coords;
-  pos = { lat:c.latitude, lon:c.longitude, acc:c.accuracy, spd:c.speed, hdg:c.heading, t:g.timestamp };
-  $('gpsdot').className = 'dot ok'; $('gpstxt').textContent = 'gps fix';
+function applyFix(f){
+  pos = f;
+  $('gpsdot').className = 'dot ok';
+  $('gpstxt').textContent = f.src === 'ship' ? 'ais fix' : 'gps fix';
+  $('srctxt').textContent = f.src === 'ship' ? 'AIS·' + SHIP.name : 'PHONE GPS';
   banner.classList.remove('show');
 
-  marker.setLngLat([pos.lon, pos.lat]).addTo(map);
-  const moving = pos.hdg != null && pos.spd > 0.5;
+  marker.setLngLat([f.lon, f.lat]).addTo(map);
+  const moving = f.hdg != null && (f.spdKn == null || f.spdKn > 0.8);
   hdgEl.style.display = moving ? 'block' : 'none';
-  if (moving) marker.setRotation(pos.hdg);
+  if (moving) marker.setRotation(f.hdg);
 
   const last = trail[trail.length-1];
   if (!last){
-    trail.push({lat:pos.lat, lon:pos.lon, t:pos.t}); persist();
+    trail.push({lat:f.lat, lon:f.lon, t:f.t}); persist();
   } else {
-    const nm = nmBetween(last, pos);
-    if (nm > 0.01 || pos.t - last.t > 60000){
+    const nm = nmBetween(last, f);
+    if (nm > 0.01 || f.t - last.t > 60000){
       if (nm < 50) totalNm += nm;
-      trail.push({lat:pos.lat, lon:pos.lon, t:pos.t}); persist();
+      trail.push({lat:f.lat, lon:f.lon, t:f.t}); persist();
     }
   }
   refreshTrail();
 
   if (firstFix){
     firstFix = false;
-    map.flyTo({ center:[pos.lon,pos.lat], zoom: 9.5, pitch: tilted?50:0, duration: 2600, essential:true });
+    map.flyTo({ center:[f.lon,f.lat], zoom: 9.5, pitch: tilted?50:0, duration: 2600, essential:true });
   } else if (follow){
-    map.easeTo({ center:[pos.lon,pos.lat], duration: 900 });
+    map.easeTo({ center:[f.lon,f.lat], duration: 900 });
   }
   updateDeck();
 }
+function showBanner(htmlMsg){
+  banner.innerHTML = htmlMsg;
+  banner.classList.add('show');
+}
+function searching(label){
+  $('gpsdot').className = 'dot wait';
+  $('gpstxt').textContent = label;
+}
 
-function onErr(err){
-  if (pos) return;
+/* ================= source: phone GPS ================= */
+function onGeoFix(g){
+  const c = g.coords;
+  applyFix({ lat:c.latitude, lon:c.longitude, acc:c.accuracy,
+    spdKn: c.speed != null ? c.speed*1.94384 : null, hdg:c.heading, t:g.timestamp, src:'gps' });
+}
+function onGeoErr(err){
+  if (pos && mode === 'gps') return;
   $('gpsdot').className = 'dot err'; $('gpstxt').textContent = 'no fix';
   const msgs = {
     0: '<b>This browser has no GPS access.</b> Open this page in Safari or Chrome directly.',
-    1: '<b>Location is blocked.</b> Settings &rarr; Privacy &amp; Security &rarr; Location Services &rarr; Safari Websites &rarr; While Using + Precise. Then reload.',
-    2: '<b>No GPS signal.</b> Get sky view &mdash; out on deck or by a window.',
-    3: '<b>GPS timed out.</b> Get sky view and retry.'
+    1: '<b>Location is blocked.</b> Settings &rarr; Privacy &amp; Security &rarr; Location Services &rarr; Safari Websites &rarr; While Using + Precise. Then reload. Or just use <a id="bship">ship AIS</a> &mdash; no GPS needed.',
+    2: '<b>No GPS signal.</b> Get sky view &mdash; or switch to <a id="bship">ship AIS</a>, which needs only wifi.',
+    3: '<b>GPS timed out.</b> Get sky view and <a id="bretry">retry</a>, or use <a id="bship">ship AIS</a>.'
   };
-  banner.innerHTML = (msgs[err.code] || msgs[2]) + ' <a id="retry">Retry</a>';
-  banner.classList.add('show');
-  $('retry').addEventListener('click', startGPS);
+  showBanner(msgs[err.code] || msgs[2]);
+  const r = $('bretry'); if (r) r.addEventListener('click', startGPSMode);
+  const s = $('bship'); if (s) s.addEventListener('click', startShipMode);
 }
-
-async function startGPS(){
+async function startGPSMode(){
+  stopSources(); mode = 'gps';
   $('startov').style.display = 'none';
-  $('gpsdot').className = 'dot wait'; $('gpstxt').textContent = 'acquiring';
-  banner.classList.remove('show');
-  if (!('geolocation' in navigator)) { onErr({code:0}); return; }
-  if (watchId != null) navigator.geolocation.clearWatch(watchId);
-  navigator.geolocation.getCurrentPosition(onFix, onErr,
+  $('srctxt').textContent = 'PHONE GPS';
+  searching('acquiring');
+  if (!('geolocation' in navigator)) { onGeoErr({code:0}); return; }
+  navigator.geolocation.getCurrentPosition(onGeoFix, onGeoErr,
     {enableHighAccuracy:true, maximumAge:10000, timeout:25000});
-  watchId = navigator.geolocation.watchPosition(onFix, onErr,
+  watchId = navigator.geolocation.watchPosition(onGeoFix, onGeoErr,
     {enableHighAccuracy:true, maximumAge:5000, timeout:30000});
   try { await navigator.wakeLock.request('screen'); } catch(e){}
 }
-$('startbtn').addEventListener('click', startGPS);
+
+/* ================= source: ship AIS ================= */
+function onShipPoint(lat, lon, hdgDeg, sogKn, t){
+  let spd = sogKn;
+  if (spd == null && lastShip && t > lastShip.t){
+    const hrs = (t - lastShip.t) / 3600000;
+    if (hrs > 0.005) spd = nmBetween(lastShip, {lat, lon}) / hrs;
+  }
+  if (!lastShip || lastShip.lat !== lat || lastShip.lon !== lon) lastShip = {lat, lon, t};
+  applyFix({ lat, lon, acc:null, spdKn: spd != null ? Math.min(spd, 40) : null,
+    hdg: hdgDeg, t, src:'ship' });
+}
+
+async function tryProxies(){
+  for (let i = 0; i < PROXIES.length; i++){
+    const p = PROXIES[(proxyIdx + i) % PROXIES.length];
+    try {
+      const ctl = new AbortController();
+      const to = setTimeout(() => ctl.abort(), 15000);
+      const r = await fetch(p(SHIP.page), {cache:'no-store', signal: ctl.signal});
+      clearTimeout(to);
+      if (!r.ok) throw new Error('http ' + r.status);
+      const text = await r.text();
+      const m = text.match(/"lat":(-?[\d.]+),"lon":(-?[\d.]+)/);
+      if (!m) throw new Error('no coords in page');
+      const rot = text.match(/"rotation":(-?[\d.]+)/);
+      const hdg = rot ? ((parseFloat(rot[1]) * 180 / Math.PI) % 360 + 360) % 360 : null;
+      proxyIdx = (proxyIdx + i) % PROXIES.length;
+      onShipPoint(parseFloat(m[1]), parseFloat(m[2]), hdg, null, Date.now());
+      return true;
+    } catch(e){ /* try next proxy */ }
+  }
+  return false;
+}
+async function tryPosJson(){
+  try {
+    const r = await fetch('./pos.json?ts=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    if (typeof d.lat !== 'number' || typeof d.lon !== 'number') throw new Error('bad json');
+    onShipPoint(d.lat, d.lon, d.hdg, null, d.t || Date.now());
+    return true;
+  } catch(e){ return false; }
+}
+async function pollShip(){
+  let ok = await tryPosJson();          // reliable relay, ~5 min cadence
+  if (!ok) ok = await tryProxies();     // direct scrape as backup
+  if (!ok && !pos){
+    $('gpsdot').className = 'dot err'; $('gpstxt').textContent = 'no feed';
+    showBanner('<b>Ship feed unreachable.</b> Wifi hiccup &mdash; retrying automatically. Or <a id="bgps">use phone GPS</a>.');
+    const g = $('bgps'); if (g) g.addEventListener('click', startGPSMode);
+  }
+}
+
+function connectStream(key){
+  try { ws = new WebSocket('wss://stream.aisstream.io/v0/stream'); } catch(e){ return; }
+  ws.onopen = () => ws.send(JSON.stringify({
+    APIKey: key,
+    BoundingBoxes: [[[-90,-180],[90,180]]],
+    FiltersShipMMSI: [SHIP.mmsi],
+    FilterMessageTypes: ['PositionReport']
+  }));
+  ws.onmessage = ev => {
+    try {
+      const d = JSON.parse(ev.data);
+      const p = d.Message && d.Message.PositionReport;
+      if (!p) return;
+      onShipPoint(p.Latitude, p.Longitude,
+        p.TrueHeading != null && p.TrueHeading < 360 ? p.TrueHeading : (p.Cog < 360 ? p.Cog : null),
+        p.Sog != null && p.Sog < 102 ? p.Sog : null, Date.now());
+    } catch(e){}
+  };
+  ws.onclose = () => { ws = null; if (mode === 'ship') setTimeout(() => { if (mode === 'ship' && !ws) connectStream(key); }, 8000); };
+}
+
+async function startShipMode(){
+  stopSources(); mode = 'ship';
+  $('startov').style.display = 'none';
+  $('srctxt').textContent = 'AIS·' + SHIP.name;
+  searching('acquiring');
+  pollShip();
+  shipTimer = setInterval(pollShip, 75000);
+  const key = getKey();
+  if (key) connectStream(key);
+  try { await navigator.wakeLock.request('screen'); } catch(e){}
+}
+
+function stopSources(){
+  if (watchId != null){ try { navigator.geolocation.clearWatch(watchId); } catch(e){} watchId = null; }
+  if (shipTimer){ clearInterval(shipTimer); shipTimer = null; }
+  if (ws){ try { ws.close(); } catch(e){} ws = null; }
+  pos = null; lastShip = null;
+}
+
+/* ================= key sheet (optional live feed) ================= */
+$('keysave').addEventListener('click', () => {
+  const k = $('aiskey').value.trim();
+  if (k){ try { localStorage.setItem('wake-aiskey', k); } catch(e){}
+    if (mode === 'ship'){ if (ws) ws.close(); connectStream(k); } }
+  $('keysheet').classList.remove('show');
+});
+$('keycancel').addEventListener('click', () => $('keysheet').classList.remove('show'));
 
 /* ================= link status ================= */
 function netState(){
@@ -353,10 +514,21 @@ tiltBtn.addEventListener('click', () => {
   tiltBtn.classList.toggle('on', tilted);
   map.easeTo({ pitch: tilted ? 50 : 0, duration: 800 });
 });
+const shipBtn = $('shipbtn');
+function syncModeButtons(){ shipBtn.classList.toggle('on', mode === 'ship'); }
+shipBtn.addEventListener('click', () => {
+  if (mode === 'ship'){
+    if (!getKey()) $('keysheet').classList.add('show');
+  } else { startShipMode(); }
+  syncModeButtons();
+});
 $('clear').addEventListener('click', () => {
   if (trail.length && !confirm('Clear the logged trail? (' + totalNm.toFixed(1) + ' nm)')) return;
   trail = []; totalNm = 0; persist(); refreshTrail(); updateDeck();
 });
+
+$('startbtn').addEventListener('click', () => { startShipMode(); syncModeButtons(); });
+$('startbtn2').addEventListener('click', () => { startGPSMode(); syncModeButtons(); });
 
 updateDeck();
 </script>
