@@ -198,12 +198,7 @@
       <path d="M10 0v3M10 17v3M0 10h3M17 10h3" stroke="currentColor" stroke-width="1.5"/>
     </svg>
   </button>
-  <button class="ctl" id="planbtn" aria-label="Voyage plan">
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-      <rect x="2.5" y="3.5" width="13" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
-      <path d="M2.5 7h13M6 1.5v3M12 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-    </svg>
-  </button>
+  <button class="ctl" id="planbtn" aria-label="Voyage plan"><span class="t" style="font-size:11px">PLAN</span></button>
   <button class="ctl" id="clear" aria-label="Clear trail">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
       <path d="M3 5h12M7 5V3h4v2M5 5l1 10h6l1-10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -337,8 +332,10 @@ function updateDeck(){
   $('sog').innerHTML = (pos.spdKn != null ? pos.spdKn.toFixed(1) : '––') + '<span class="unit">kn</span>';
   $('cog').textContent = (pos.hdg != null ? String(Math.round(pos.hdg)).padStart(3,'0') : '–––') + '°';
   $('latlon').textContent = fmtCoord(pos.lat,'N','S') + '  ' + fmtCoord(pos.lon,'E','W');
+  const ageM = Math.round((Date.now() - pos.t) / 60000);
+  const age = ageM < 2 ? 'live' : (ageM < 60 ? ageM + 'm ago' : Math.floor(ageM/60) + 'h ' + (ageM%60) + 'm ago');
   $('stamp').textContent = new Date(pos.t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) +
-    (pos.acc ? ' ±' + Math.round(pos.acc) + 'm' : '');
+    (pos.acc ? ' ±' + Math.round(pos.acc) + 'm' : '') + ' · ' + age;
 }
 
 /* ================= shared fix pipeline ================= */
@@ -456,7 +453,7 @@ async function tryPosJson(){
     if (!r.ok) throw new Error('http ' + r.status);
     const d = await r.json();
     if (typeof d.lat !== 'number' || typeof d.lon !== 'number') throw new Error('bad json');
-    onShipPoint(d.lat, d.lon, d.hdg, null, d.t || Date.now());
+    onShipPoint(d.lat, d.lon, d.hdg, typeof d.sog === 'number' ? d.sog : null, d.t || Date.now());
     return true;
   } catch(e){ return false; }
 }
@@ -562,6 +559,7 @@ $('startbtn').addEventListener('click', () => { startShipMode(); syncModeButtons
 $('startbtn2').addEventListener('click', () => { startGPSMode(); syncModeButtons(); });
 
 updateDeck();
+setInterval(updateDeck, 30000);
 
 /* ================= voyage: ports, ETA, shared track ================= */
 const PORTS = [
@@ -660,6 +658,11 @@ async function loadTrack(){
       if (nm < 50) totalNm += nm;
     }
     trackLoaded = true;
+    if (pos && pos.spdKn == null && trail.length >= 2){
+      const a = trail[trail.length-2], b = trail[trail.length-1];
+      const hrs = (b.t - a.t) / 3600000;
+      if (hrs > 0.02 && hrs < 6) pos.spdKn = Math.min(nmBetween(a, b) / hrs, 30);
+    }
     refreshTrail(); updateDeck();
   } catch(e){}
 }
